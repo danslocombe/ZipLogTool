@@ -11,9 +11,13 @@ import Control.Monad.IO.Class
 import qualified Data.ByteString.Lazy as ByteString
 import qualified Data.ByteString.Lazy.Char8 as C8ByteString
 import qualified Codec.Compression.GZip as GZip
+import Control.Exception
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
+import qualified Data.HashMap.Lazy as Map
+import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 
 newtype LogLine = LogLine [String] deriving Show
 newtype Base64 = Base64 String
@@ -40,7 +44,8 @@ unzipFieldPure :: LogLine -> Int -> String
 unzipFieldPure (LogLine line) i = readZip $ line !! i
 
 decodeField :: LogLine -> Int -> String
-decodeField (LogLine line) i = decode $ line !! i
+-- decodeField (LogLine line) i = decode $ line !! i
+decodeField (LogLine line) i = readZip $ line !! i
 
 tmpFilePath :: FilePath
 tmpFilePath = "C:/Users/t-dasloc/Documents/Base64UnZip/bin/Debug/hasktmp.log"
@@ -120,6 +125,35 @@ findLinesPar :: [LogLine] -> Int -> String -> [String]
 findLinesPar lines field search = map snd $ concat $ runPar $ do
   let threadLines = splitN threads lines
   parMap (\xs -> findLines xs field search) threadLines
+
+showSchemaX :: Int -> IO ()
+showSchemaX tmp = do
+  x' <- x :: IO [LogLine]
+  let y@(LogLine z) = head x'
+      n = length z
+      fields = map (\i -> decodeField y i) [tmp]
+      jsons = catMaybes $ map (\f -> Aeson.decode $ C8ByteString.pack f) fields
+      strs = map objStruct jsons
+  mapM putStrLn strs
+  putStrLn "Done"
+
+objStruct :: Aeson.Object -> String
+objStruct x = concatMap 
+  (\k -> fromMaybe "" $ f k <$> Map.lookup k x) keys
+  where keys = Map.keys x :: [Text.Text]
+      
+        f k v = let k' = Text.unpack k in
+            k' ++ " :: " ++ (showType v) ++ ", "
+
+showType :: Aeson.Value -> String
+showType v = case v of
+  Aeson.Object o -> "{ " ++ objStruct o ++ " }"
+  Aeson.Array xs -> 
+    "[ " ++ (fromMaybe "" $ showType <$> Vector.headM xs) ++  " ]"
+  Aeson.String s -> "String"
+  Aeson.Number n -> "Int"
+  Aeson.Bool b -> "Bool"
+  Aeson.Null -> "Null"
 
 main :: IO ()
 main = replicateM_ 500 $ do 
