@@ -37,7 +37,6 @@ unzipFieldPure :: LogLine -> Int -> String
 unzipFieldPure (LogLine line) i = readZip $ line !! i
 
 decodeField :: LogLine -> Int -> String
--- decodeField (LogLine line) i = decode $ line !! i
 decodeField (LogLine line) i = readZip $ line !! i
 
 readZip :: String -> String
@@ -47,21 +46,6 @@ makePretty :: String -> String
 makePretty s = fromMaybe "" (C8ByteString.unpack <$> json)
   where
     json = Aeson.encodePretty <$> (Aeson.decode $ C8ByteString.pack s :: Maybe Aeson.Object)
-
-
--- findLinesX :: Int -> String -> IO [(Int, String)]
--- findLinesX field search = findLines <$> x <*> return field <*> return search
-
--- findLinesXPrintPretty :: Int -> String -> IO ()
--- findLinesXPrintPretty field search = join $ (liftM2 forM_) lines $ return (\line -> putStrLn ((makePretty . snd) line))
-  -- where lines = findLinesX field search
-
--- findLinesXFV :: Int -> String -> String -> IO [String]
--- findLinesXFV fieldId field value = (liftM4 findLinesFV) x (return fieldId) (return field) (return value)
-
--- findLinesXFVPrintPretty :: Int -> String -> String -> IO ()
--- findLinesXFVPrintPretty fieldId field value = join $ (liftM2 forM_) lines $ return (\line -> putStrLn ((makePretty) line))
-  -- where lines = findLinesXFV fieldId field value
 
 findLinesN :: [LogLine] -> Int -> [String] -> [(Int, String)]
 findLinesN lines field finds = 
@@ -98,6 +82,7 @@ splitN n xs = map (\j ->
 
 threads = 4
 
+-- Slower for some reason?
 findLinesPar :: [LogLine] -> Int -> String -> [String]
 findLinesPar lines field search = map snd $ concat $ runPar $ do
   let threadLines = splitN threads lines

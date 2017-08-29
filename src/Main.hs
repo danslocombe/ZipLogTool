@@ -7,6 +7,10 @@ import Control.Monad
 import Data.Maybe
 import System.Environment
 import Data.List.Split (splitOn)
+import System.Console.ANSI
+import System.IO
+import Data.Either (isLeft)
+import Control.Exception (try)
 
 main :: IO ()
 main = do
@@ -16,46 +20,60 @@ main = do
     _ -> putStrLn $ "Usage: " ++ name ++ ".exe InstrumentedLogs_0.log"
 
 name :: String
-name = "blagh"
+name = "ZipLogTool"
 
 shell :: IO [LogLine] -> IO ()
 shell linesIO = do
   lines <- linesIO
+  valid <- validFields $ head lines
   let lineCount = length lines
       lineSize = length $ fromLogLine $ head lines
+  putStrLn $ "> " ++ name ++ " loaded with " ++ show lineCount ++ " lines with " ++ show lineSize ++ " fields"
   putStrLn "> For a list of cammands, use \"help\""
   forever $ do
-    putStrLn $ "> " ++ name ++ " loaded with " ++ show lineCount ++ " lines with " ++ show lineSize ++ " fields"
+    prettyBar valid
+    putStr ">>> "
+    hFlush stdout
+    -- This will break on tiny <4 char consoles
+    setCursorColumn 4
     command <- getLine
+    putStr "\n"
     let command' = splitOn " " command
     case command' of
       [""] -> return ()
-      nonempty -> parseCommand lines nonempty
+      nonempty -> parseCommand valid lines nonempty
     return ()
-    
 
-parseCommand :: [LogLine] -> [String] -> IO ()
-parseCommand ll [] = return ()
-parseCommand ll (c:args) = 
+parseFieldId :: [Bool] -> String -> Maybe Int
+parseFieldId valid s = (readMay s :: Maybe Int) >>= \x ->
+  if valid !! x
+    then Just x
+    else Nothing
+
+parseCommand :: [Bool] -> [LogLine] -> [String] -> IO ()
+parseCommand _ _ [] = return ()
+parseCommand valid ll (c:args) = 
   case c of
-    "find" -> doFind ll args
-    "show" -> doShow ll args
-    "schema"   -> doSchema ll arg1
+    "find" -> doFind valid ll args
+    "show" -> doShow valid ll args
+    "info" -> undefined
+    "schema"   -> doSchema valid ll arg1
     _ -> putStrLn $ "Unknown command \"" ++ c ++ "\", use \"help\" to show commands"
     where arg1 = fromMaybe "" $ listToMaybe args
 
-doSchema :: [LogLine] -> String -> IO ()
-doSchema _ "" = putStrLn "Usage: schema {fieldId | all}"
-doSchema ls "all" = undefined
-doSchema ls arg = case readMay arg :: Maybe Int of
-  Nothing -> return ()
+doSchema :: [Bool] -> [LogLine] -> String -> IO ()
+doSchema _ _ "" = putStrLn "Usage: schema {fieldId | all}"
+doSchema valid ls "all" = mapM_ (showSchema ls) 
+  [i | (i, x) <- zip [0..] valid, x]
+doSchema valid ls arg = case parseFieldId valid arg of
+  Nothing -> putStrLn $ "Invalid field id \"" ++ arg ++ "\""
   Just x  -> showSchema ls x
 
-doShow :: [LogLine] -> [String] -> IO ()
-doShow _ []   = putStrLn "Usage: show {fieldId | all} [logid | full]"
-doShow _ [""] = putStrLn "Usage: show {fieldId | all} [logid | full]"
-doShow ls (lineS:specS) = do
-  let lineM = readMay lineS :: Maybe Int
+doShow :: [Bool] -> [LogLine] -> [String] -> IO ()
+doShow _ _ []   = putStrLn "Usage: show {fieldId | all} [logid | full]"
+doShow _ _ [""] = putStrLn "Usage: show {fieldId | all} [logid | full]"
+doShow valid ls (lineS:specS) = do
+  let lineM = parseFieldId valid lineS
   case lineM of
                  -- Hack, we are searching with the empty list as our query
     Just line -> let results@(result:_) = map snd $ findLinesN ls line []
@@ -65,20 +83,38 @@ doShow ls (lineS:specS) = do
                    (s:_)    -> (case readMay s of
                                  Just n  -> [results !! n]
                                  Nothing -> []))
-    Nothing   -> putStrLn $ "Could not parse \"" ++ lineS ++ "\" as a valid line field number"
+    Nothing   -> putStrLn $ "Invalid field id \"" ++ lineS ++ "\""
 
-doFind :: [LogLine] -> [String] -> IO ()
-doFind [] _ = putStrLn "Logs are empty!"
-doFind _ [] = putStrLn "Usage: find {fieldId} {search1} {search2} ..."
-doFind _ [""] = putStrLn "Usage: find {fieldId} {search1} {search2} ..."
-doFind logs@(l:ls) (lineS:find:finds) = do
-  let lineM = readMay lineS :: Maybe Int
+doFind :: [Bool] -> [LogLine] -> [String] -> IO ()
+doFind _ [] _ = putStrLn "Logs are empty!"
+doFind _ _ [] = putStrLn "Usage: find {fieldId} {search1} {search2} ..."
+doFind _ _ [""] = putStrLn "Usage: find {fieldId} {search1} {search2} ..."
+doFind valid logs@(l:ls) (lineS:find:finds) = do
+  let lineM = parseFieldId valid lineS
   case lineM of
     Just line -> let result = findLinesN logs line (find:finds)
                  in mapM_ (\(i, r) -> putStrLn $ "Match in log line:" ++ show i ++ "\n" ++ makePretty r) result
-    Nothing   -> putStrLn $ "Could not parse \"" ++ lineS ++ "\" as a valid line field number"
+    Nothing   -> putStrLn $ "Invalid field id \"" ++ lineS ++ "\""
 
-doFind _ _ = putStrLn "Invalid args"
+doFind _ _ _ = putStrLn "Invalid args"
            
 stdFile :: FilePath
 stdFile = "C:\\Users\\t-dasloc\\AutoSuggestProcessorInstrumentationLog_16.log"
+
+validFields :: LogLine -> IO [Bool]
+validFields ll@(LogLine fields) = 
+  return [False, False, False, True, False, False, True, False]
+  -- let n = length fields
+  -- in mapM (\i -> isLeft <$> (try $ (return $ decodeField ll i :: IO String) :: IO (Either jkj)) [0..n-1]
+
+prettyBar :: [Bool] -> IO ()
+prettyBar bs = do
+  putStr "["
+  mapM_ (\(b, i) -> do
+    if b
+      then setSGR [SetColor Foreground Vivid Green]
+      else setSGR [SetColor Foreground Vivid Red]
+    putStr $ (show i) ++ "--"
+    ) $ zip bs [0..]
+  setSGR [Reset]
+  putStr "]\n"
