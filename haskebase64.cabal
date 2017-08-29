@@ -32,3 +32,4 @@ executable haskebase64
                      , unordered-containers >= 0.2.8.0
                      , text >= 1.2.2.2
                      , vector >= 0.12.0.1
+                     , safe >= 0.3.14
