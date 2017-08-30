@@ -9,8 +9,10 @@ import System.Environment
 import Data.List.Split (splitOn)
 import System.Console.ANSI
 import System.IO
-import Data.Either (isLeft)
+import Data.Either (isLeft, isRight)
 import Control.Exception (try)
+import Codec.Compression.Zlib.Internal (DecompressError)
+import qualified Data.ByteString.Lazy.Char8 as C8ByteString
 
 main :: IO ()
 main = do
@@ -25,7 +27,7 @@ name = "ZipLogTool"
 shell :: IO [LogLine] -> IO ()
 shell linesIO = do
   lines <- linesIO
-  valid <- validFields $ head lines
+  valid <- validFields lines
   let lineCount = length lines
       lineSize = length $ fromLogLine $ head lines
   putStrLn $ "> " ++ name ++ " loaded with " ++ show lineCount ++ " lines with " ++ show lineSize ++ " fields"
@@ -57,6 +59,7 @@ parseCommand valid ll (c:args) =
     "find" -> doFind valid ll args
     "show" -> doShow valid ll args
     "info" -> undefined
+    "raw"  -> doRaw ll args
     "schema"   -> doSchema valid ll arg1
     _ -> putStrLn $ "Unknown command \"" ++ c ++ "\", use \"help\" to show commands"
     where arg1 = fromMaybe "" $ listToMaybe args
@@ -68,6 +71,12 @@ doSchema valid ls "all" = mapM_ (showSchema ls)
 doSchema valid ls arg = case parseFieldId valid arg of
   Nothing -> putStrLn $ "Invalid field id \"" ++ arg ++ "\""
   Just x  -> showSchema ls x
+
+doRaw :: [LogLine] -> [String] -> IO ()
+doRaw _ [] = putStrLn "Usage: raw {fieldId | all}"
+doRaw _ [""] = putStrLn "Usage: raw {fieldId | all}"
+doRaw ls ["all"] = mapM_ (\(i, f) -> putStrLn $ "Field: " ++ show i ++ "\n" ++ f ++ "\n") 
+                     (zip [0..] $ fromLogLine $ head ls)
 
 doShow :: [Bool] -> [LogLine] -> [String] -> IO ()
 doShow _ _ []   = putStrLn "Usage: show {fieldId | all} [logid | full]"
@@ -101,11 +110,24 @@ doFind _ _ _ = putStrLn "Invalid args"
 stdFile :: FilePath
 stdFile = "C:\\Users\\t-dasloc\\AutoSuggestProcessorInstrumentationLog_16.log"
 
-validFields :: LogLine -> IO [Bool]
-validFields ll@(LogLine fields) = 
-  return [False, False, False, True, False, False, True, False]
-  -- let n = length fields
-  -- in mapM (\i -> isLeft <$> (try $ (return $ decodeField ll i :: IO String) :: IO (Either jkj)) [0..n-1]
+validFields :: [LogLine] -> IO [Bool]
+validFields ls@(LogLine head:_) = 
+  let n = length head
+  in mapM (validField ls) [0..n-1]
+
+validField :: [LogLine] -> Int -> IO Bool
+validField ls i = do
+  or <$> mapM (validGZip . (!! i) . fromLogLine)
+     -- Bit hacky, will break on single-field logs
+     (filter ((> 1) . length . fromLogLine) ls)
+
+validGZip :: String -> IO Bool
+validGZip s = 
+  isRight <$> (try 
+      (do 
+      decoded <- return $ readZip s
+      seq decoded $ return decoded) 
+      :: IO (Either DecompressError String)) 
 
 prettyBar :: [Bool] -> IO ()
 prettyBar bs = do
